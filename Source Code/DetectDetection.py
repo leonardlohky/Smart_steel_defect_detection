@@ -58,6 +58,8 @@ class detection_system:
 
         else:
             print('No file inside input folder')
+            output_df = pd.DataFrame(columns = ['ImageId'])
+            return(output_df)
            
             
     def defect_prediction(self, df):
@@ -307,17 +309,26 @@ class detection_system:
         
 if __name__ == '__main__':
     
+    #load class
     detect = detection_system()
+    #load image from input folder
     df = detect.data_prep()
-    print('Load image from input folder')
-    print('\n')
-    pred_df = detect.defect_prediction(df)
-    print('Complete defect prediction')
-    print('\n')
-    seg_df = detect.segmentation_pred(pred_df)
-    print('Complete defect segmentation')
-    detect.post_processing(pred_df, seg_df)
-    print('Defect detection completed')
+    
+    if (len(df)>0):
+    
+        pred_df = detect.defect_prediction(df)
+        print('Complete defect prediction')
+        print('\n')
+        seg_df = detect.segmentation_pred(pred_df)
+        print('Complete defect segmentation')
+        detect.post_processing(pred_df, seg_df)
+        print('Defect detection completed')  
+        exit()
+        
+    else:
+        print('Please load image into input folder and re-run \n')
+        exit()
+
     
     
     
