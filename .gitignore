@@ -1,0 +1,7 @@
+.spyproject
+.idea
+__pycache__
+venv
+algoML_forex/strategy/.ipynb_checkpoints/Untitled-checkpoint.ipynb
+algoML_forex/sentiment/us_equities_news_dataset.csv
+algoML_forex/sentiment/trainingsentiData.csv
