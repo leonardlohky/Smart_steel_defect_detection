@@ -10,6 +10,7 @@ from PIL import Image
 import matplotlib.pyplot as plt
 import os
 os.environ["SM_FRAMEWORK"] = "tf.keras"
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' 
 import segmentation_models
 import keras
 from keras.preprocessing.image import ImageDataGenerator
@@ -329,10 +330,16 @@ if __name__ == '__main__':
         print('Enter Start or type quit to exit')
         
         enter = str(input('Please enter: ')).lower()
-      
-        if enter == (('quit') or ('exit')):
+        input_list = ['quit', 'exit', 'end']
+        input_str = [in_str for in_str in input_list if enter in in_str]
+
+        if input_str:
             exit()
-            break 
+            break
+      
+        #if enter == (('quit') or ('exit')):
+        #    exit()
+        #    break 
         else:
             if enter == 'start':
                 #load image from input folder

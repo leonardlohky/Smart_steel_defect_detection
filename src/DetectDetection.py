@@ -8,10 +8,9 @@ import cv2
 import shutil
 from PIL import Image
 import matplotlib.pyplot as plt
-#%matplotlib inline
-#%env SM_FRAMEWORK=tf.keras
 import os
 os.environ["SM_FRAMEWORK"] = "tf.keras"
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' 
 import segmentation_models
 import keras
 from keras.preprocessing.image import ImageDataGenerator
@@ -27,8 +26,6 @@ from model_metric import dice_coef, recall_m, precision_m, f1_score_m
 from mask_img import rle_to_mask, build_mask, mask_to_contours, visualise_mask
 from array_img import img_array_gen
 
-
-    
 class detection_system:
     
     def __init__(self):
@@ -37,6 +34,24 @@ class detection_system:
         self.output_folder = '../Output/'
         self.model_folder = '../Model/'
         self.archieve_folder = '../Output/archive/'
+        
+        print('Load models\n')
+        
+        dependencies = {
+                        'recall_m':recall_m,
+                        'precision_m':precision_m,
+                        'dice_coef':dice_coef,
+                        'f1_score_m':f1_score_m,
+                        'dice_loss':sm.losses.dice_loss
+                       }
+        
+        self.defect_model = load_model(self.model_folder + 'Defect_model.h5', custom_objects=dependencies)
+        self.type1_model = load_model(self.model_folder + 'Defect_type1_model.h5', custom_objects=dependencies)
+        self.type2_model = load_model(self.model_folder + 'Defect_type2_model.h5', custom_objects=dependencies)
+        self.type3_model = load_model(self.model_folder + 'Defect_type3_model.h5', custom_objects=dependencies)
+        self.type4_model = load_model(self.model_folder + 'Defect_type4_model.h5', custom_objects=dependencies)    
+        
+        print('Models loaded\n')
         
     
     def data_prep(self):
@@ -66,20 +81,13 @@ class detection_system:
         
         model_path=self.model_folder
 
-        dependencies = {
-                        'recall_m':recall_m,
-                        'precision_m':precision_m,
-                        'dice_coef':dice_coef,
-                        'f1_score_m':f1_score_m,
-                        'dice_loss':sm.losses.dice_loss
-                       }
-
         def class_pred(df):
+            
             '''
             Input: ImageIds in form of a dataframe
-            Return: Predictions of classification models
+            Output: Prediction of hasDefect 0 or 1 in form of a dataframe
             '''
-            defect_model = load_model(model_path + 'Defect_model.h5', custom_objects=dependencies)
+            
             df = df.reset_index().drop('index',axis=1)
             img_file = ImageDataGenerator(rescale=1./255).flow_from_dataframe(dataframe=df, 
                                                                               directory='../Input/', 
@@ -89,21 +97,19 @@ class detection_system:
                                                                               batch_size=1, 
                                                                               shuffle=False)
 
-            defect_pred = defect_model.predict(img_file, verbose=0)
+            defect_pred = self.defect_model.predict(img_file, verbose=0)
             defect_status = pd.DataFrame(defect_pred, columns = ['hasDefect'])
             defect_status['hasDefect'] = np.where(defect_pred>0.6,1,0)
             defect_status['ImageId'] = df['ImageId']
             return defect_status[['ImageId', 'hasDefect']]
 
         def seg_pred(df):
+            
             '''
             Input: ImageIds in form of a dataframe
-            Return: Predictions of segmentation models
+            Output: Segmentation of encoded pixels in form of a dataframe
             '''
-            type1_model = load_model(model_path + 'Defect_type1_model.h5', custom_objects=dependencies)
-            type2_model = load_model(model_path + 'Defect_type2_model.h5', custom_objects=dependencies)
-            type3_model = load_model(model_path + 'Defect_type3_model.h5', custom_objects=dependencies)
-            type4_model = load_model(model_path + 'Defect_type4_model.h5', custom_objects=dependencies)
+            
             df = df.reset_index().drop('index',axis=1)
             preprocess = get_preprocessing('efficientnetb1')
             tmp=[]
@@ -112,10 +118,10 @@ class detection_system:
             for j in range((len(df)//loop_num)+1):
                 img_seg = df[loop_num*j:loop_num*j+loop_num]
                 img_array =  img_array_gen(img_seg, preprocess=preprocess)
-                model1_pred = type1_model.predict(img_array,verbose=0)
-                model2_pred = type2_model.predict(img_array,verbose=0)
-                model3_pred = type3_model.predict(img_array,verbose=0)
-                model4_pred = type4_model.predict(img_array,verbose=0)
+                model1_pred = self.type1_model.predict(img_array,verbose=0)
+                model2_pred = self.type2_model.predict(img_array,verbose=0)
+                model3_pred = self.type3_model.predict(img_array,verbose=0)
+                model4_pred = self.type4_model.predict(img_array,verbose=0)
 
                 for i in range(len(model1_pred)):
                     type1 = mask2rle(np.array((Image.fromarray((model1_pred[i][:,:,0])>=0.5)).resize((1600,256))).astype(int))
@@ -130,10 +136,12 @@ class detection_system:
             return(seg_df)
 
         def comb_pred(df):
+            
             '''
-            Input: ImageId (dataframe)
-            Return: Comdined dataframe of output of pred_classification function and pred_segmentation function
+            Input: ImageIds in form of a dataframe
+            Output: Combination of prediction from classification and segmentation model in form of dataframe
             '''
+            
             df = df.reset_index().drop('index',axis=1)
             merge_df = class_pred(df).merge(seg_pred(df),on=['ImageId'])
 
@@ -162,12 +170,10 @@ class detection_system:
         return pred_output
 
     def segmentation_pred(self, df):
+        
         '''
-        Function-1:
-        Input: ImageId(dataframe)
-        Process: Calls pred_combined which calls pred_classification and pred_segmentation
-                Applies thresholds -> area and classification probability
-        Return: DataFrame (columns = ImageId_ClassId,EncodedPixels)
+        Input: ImageIds in form of a dataframe
+        Output: Encoded pixels for different type of defect in form of a dataframe
 
         '''
         df = df.drop(columns=['Defect_Class'])
@@ -207,8 +213,9 @@ class detection_system:
 
     def post_processing(self, df, seg_df):
         
-        input_path=self.input_folder
-        output_path=self.output_folder
+        input_path = self.input_folder
+        output_path = self.output_folder
+        archieve_path = self.archieve_folder
 
         seg_df['ImageId'] = seg_df['ImageId_ClassId'].apply(lambda x: x.split('_')[0])
         seg_df['ClassId'] = seg_df['ImageId_ClassId'].apply(lambda x: x.split('_')[1])
@@ -271,7 +278,7 @@ class detection_system:
                         continue
                     file_path = os.path.join(top, filename)
                     if filename in record_img:
-                        shutil.move(file_path, os.path.join(archieve_folder, filename))    
+                        shutil.move(file_path, os.path.join(archieve_path, filename))    
 
             print('Scoring completed, image file(s) moved to archieve folder')
 
@@ -311,25 +318,42 @@ if __name__ == '__main__':
     
     #load class
     detect = detection_system()
-    #load image from input folder
-    df = detect.data_prep()
     
-    if (len(df)>0):
-    
-        pred_df = detect.defect_prediction(df)
-        print('Complete defect prediction')
-        print('\n')
-        seg_df = detect.segmentation_pred(pred_df)
-        print('Complete defect segmentation')
-        detect.post_processing(pred_df, seg_df)
-        print('Defect detection completed')  
-        exit()
+    while True:
         
-    else:
-        print('Please load image into input folder and re-run \n')
-        exit()
+        print('*************************************************************')
+        print('*                                                           *')
+        print('*          NUS ISS Group 8 Defect Detection System          *')
+        print('*                                                           *')
+        print('*************************************************************')
+        print('\n')
+        print('Enter Start or type quit to exit')
+        
+        enter = str(input('Please enter: ')).lower()
+        input_list = ['quit', 'exit', 'end']
+        input_str = [in_str for in_str in input_list if enter in in_str]
 
-    
-    
-    
-    
+        if input_str:
+            exit()
+            break
+        else:
+            if enter == 'start':
+                #load image from input folder
+                df = detect.data_prep()
+                if (len(df)>0):
+                    pred_df = detect.defect_prediction(df)
+                    print('Complete defect prediction')
+                    print('\n')
+                    seg_df = detect.segmentation_pred(pred_df)
+                    print('Complete defect segmentation')
+                    detect.post_processing(pred_df, seg_df)
+                    print('Defect detection completed\n')  
+                    print('\n')
+                    #break
+                    #exit()
+                else:
+                    print('Please load image into input folder and re-run \n')
+                    #break
+                    #exit()
+            else:
+                print('wrong input \n')
